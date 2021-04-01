@@ -1,43 +1,122 @@
-from datetime import datetime
+# -*- coding: utf-8 -*-
+# Run this app with `python app.py` and
+# visit http://127.0.0.1:8050/ in your web browser.
+import dash
+import dash_core_components as dcc
+import dash_html_components as html
+import plotly.express as px
 import pandas as pd
+from flask import request
+import requests
+import io
+import datetime
+from dash.dependencies import Input, Output
+import dash  # (version 1.12.0)
+from dash.dependencies import Input, Output
+import dash_table
+import dash_core_components as dcc
+import dash_html_components as html
+import plotly.express as px
+import pandas as pd
+import plotly.graph_objects as go
+import traceback
+from signalrcore.hub_connection_builder import HubConnectionBuilder
+from signalrcore.protocol.messagepack_protocol import MessagepackProtocol
 
-from quixstreaming import *
 
-# Create a client factory. Factory helps you create StreamingClient (see below) a little bit easier
-security = SecurityOptions('../certificates/ca.cert', "deloitte-eventinteractiondemo", "rxrPhx3x20yYPqkELwaa3Lhd0szVgXc8bT2")
-client = StreamingClient('kafka-k1.quix.ai:9093,kafka-k2.quix.ai:9093,kafka-k3.quix.ai:9093', security)
+external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
+app = dash.Dash(__name__, external_stylesheets=external_stylesheets)
 
-# Open output topic connection.
-output_topic = client.open_output_topic('deloitte-eventinteractiondemo-words-count-10s')
+experiment_id = ""
 
-# Create a new stream. A stream is a collection of data that belong to a single session of a single source.
-# For example single car journey.
-# If you don't specify stream id, random guid is generated.
-# Specify it if you want append data into the stream later.
-# stream = output_topic.create_stream("my-own-stream-id")
-stream = output_topic.create_stream()
+def load_data():
+    url = "https://telemetry-query-deloitte-eventinteractiondemo.platform.quix.ai/parameters/data"
+    token = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6Ik1qVTBRVE01TmtJNVJqSTNOVEpFUlVSRFF6WXdRVFF4TjBSRk56SkNNekpFUWpBNFFqazBSUSJ9.eyJodHRwczovL3F1aXguYWkvcm9sZXMiOiIiLCJodHRwczovL3F1aXguYWkvb3JnX2lkIjoiZGVsb2l0dGUiLCJpc3MiOiJodHRwczovL2xvZ2ljYWwtcGxhdGZvcm0uZXUuYXV0aDAuY29tLyIsInN1YiI6ImF1dGgwfGU1OWQzZmQ1LWNjNTMtNGZmNi04MDEyLWU1ZDIxYjllMDhmYiIsImF1ZCI6WyJxdWl4IiwiaHR0cHM6Ly9sb2dpY2FsLXBsYXRmb3JtLmV1LmF1dGgwLmNvbS91c2VyaW5mbyJdLCJpYXQiOjE2MTcyODc2ODIsImV4cCI6MTYxOTg3OTY4MiwiYXpwIjoiMHptV2ZKZGtpdUdQaUpXeXBTQ0E4ckthVnZmUERLTEkiLCJzY29wZSI6Im9wZW5pZCBwcm9maWxlIGVtYWlsIiwicGVybWlzc2lvbnMiOltdfQ.bEyV7OkZAljMZjie92TonnH3GVkpbMCeaCgu4RKyeHdMseq2CEtr0g9Czr_tAwAQIrUes-Ibuqhmvdx7wtMOHwOdDdA4u3uIyKfiJ2KPf4GY650jxeoX1mON2IiSTCR6JFxuBWnaayVjLL_hx4NUZpfBmcL9P7HX8kjrbtMnWzlB4VHHm8PhXeI006zupxu9alDws7pmO3gEWzIjtozUvS9V12f3r6ZHrkx_63iZTH7i6dv-gy0CkE_za9oNxgwdDV42wqalXf0I4ocFS1RHu2kYR9z_mGoWJrVHoaEn5iup6j9lmTDVOsasdFIseKlynUzldIAYqNJMxOdQwR0R_A"
+    head = {'Authorization': 'Bearer {}'.format(token), 'Accept': "application/csv"}
+    payload = {
+        'from': 1617282074655142400,
+        'to': 1617288750679790600,
+        'numericParameters': [
+            {
+                'parameterName': 'word-count',
+                'aggregationType': 'None'
+            }
+        ],
+        'stringParameters': [],
+        'streamIds': [
+            'CocoaMQTT-816',
+            'CocoaMQTT-816-words-counter'
+        ],
+        'groupBy': []
+    }
 
-# Give the stream human readable name. This name will appear in data catalogue.
-stream.properties.name = "cardata"
+    response = requests.post(url, headers=head, json=payload)
 
-# Save stream in specific folder in data catalogue to help organize your workspace.
-stream.properties.location = "/static data"
+    panda_frame = pd.read_csv(io.StringIO(response.content.decode('utf-8')))
 
-# Add stream metadata to add context to time series data.
-stream.properties.metadata["circuit"] = "Sakhir Short"
-stream.properties.metadata["player"] = "Swal"
-stream.properties.metadata["game"] = "Codemasters F1 2019"
+    with pd.option_context('display.max_rows', None, 'display.max_columns', None):
+        print(panda_frame)
 
-df = pd.read_csv("cardata.csv")
+    # with pd.option_context('display.max_rows', None, 'display.max_columns', None):
+    # print(panda_frame)
+    if panda_frame.size > 0:
+        print("Timestamp")
+        panda_frame["Timestamp"] = panda_frame["Timestamp"].apply(lambda x: str(datetime.datetime.fromtimestamp(x / 1000000000)))
+    return panda_frame
 
-# Add TAG__ prefix to column LapNumber to use this column as tag (index).
-df = df.rename(columns={"LapNumber" : "TAG__LapNumber" })
 
-# Write data frame to output topic.
-stream.parameters.write(df)
+panda_frame = load_data()
 
-print("Closing stream")
 
-# Stream can be infinitely long or have start and end.
-# If you send data into closed stream, it is automatically opened again.
-stream.close()
+app.layout = html.Div(children=[
+    html.H1(children='Test dashboard'),
+    html.Div(children='''
+        Word count
+    '''),
+    dcc.Input(
+            id="input",
+            type="text"
+    ),
+    dcc.Graph(
+        id='word-count',
+
+    ),
+    dcc.Interval(
+        id='interval_component',
+        interval=1000,
+        n_intervals=0,
+        
+    ),
+    html.Div(children='''
+'''),
+] + [html.Div(id="out-all-types")])
+
+
+@app.callback(Output('word-count', 'figure'), [Input('interval_component', 'n_intervals')])
+def update_data(n_intervals):
+    try:
+        data = load_data()
+
+        scatter = go.Scatter(x=data["Timestamp"].to_numpy(), y=data["word-count"].to_numpy(), mode='lines+markers', name='lines+markers')
+
+        # tuple is (dict of new data, target trace index, number of points to keep)
+        fig = go.Figure(
+            data=[scatter]
+        )
+        return fig
+
+    except Exception:
+        print(traceback.format_exc())
+
+
+@app.callback(
+    Output("out-all-types", "children"),
+    [Input("input", "value")]
+)
+def cb_render(value):
+    global experiment_id
+    experiment_id = value
+    return value
+
+if __name__ == '__main__':
+    app.run_server(debug=True, host="0.0.0.0", port=80)
